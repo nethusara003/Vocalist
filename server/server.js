@@ -99,7 +99,20 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "GET" && req.url.startsWith("/files/")) {
       const filename = path.basename(new URL(req.url, "http://localhost").pathname), file = path.join(outputDir, filename);
       if (!fs.existsSync(file)) return json(res, 404, { error: "File not found" });
-      res.writeHead(200, { "Content-Type": filename.endsWith(".mp3") ? "audio/mpeg" : "audio/wav", "Content-Disposition": `attachment; filename="${filename.replace(/^[^-]+-/, "")}"` });
+      const size = fs.statSync(file).size;
+      const contentType = filename.endsWith(".mp3") ? "audio/mpeg" : "audio/wav";
+      const downloadName = filename.split("-").slice(5).join("-") || filename;
+      const range = req.headers.range;
+      if (range) {
+        const match = range.match(/bytes=(\d*)-(\d*)/);
+        if (!match) return json(res, 416, { error: "Invalid byte range" });
+        const start = match[1] ? Number(match[1]) : Math.max(0, size - Number(match[2]));
+        const end = match[2] ? Math.min(Number(match[2]), size - 1) : size - 1;
+        if (start > end || start >= size) return json(res, 416, { error: "Requested range is not satisfiable" });
+        res.writeHead(206, { "Content-Type": contentType, "Content-Length": end - start + 1, "Content-Range": `bytes ${start}-${end}/${size}`, "Accept-Ranges": "bytes", "Content-Disposition": `inline; filename="${downloadName}"` });
+        return fs.createReadStream(file, { start, end }).pipe(res);
+      }
+      res.writeHead(200, { "Content-Type": contentType, "Content-Length": size, "Accept-Ranges": "bytes", "Content-Disposition": `attachment; filename="${downloadName}"` });
       return fs.createReadStream(file).pipe(res);
     }
     const filePath = req.url === "/" ? path.join(root, "index.html") : path.join(root, path.normalize(req.url).replace(/^(\.\.(\/|\\|$))+/, ""));
