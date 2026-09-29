@@ -88,8 +88,8 @@ ffmpeg -version
 `kokoro-mlx` supports Python 3.10–3.12. Use Python 3.12 if it is available:
 
 ```bash
-python3.12 -m venv .venv
-source .venv/bin/activate
+python3.12 -m venv .venv-kokoro
+source .venv-kokoro/bin/activate
 python -m pip install --upgrade pip
 python -m pip install kokoro-mlx soundfile
 ```
@@ -109,7 +109,7 @@ The server does not require secrets or API keys. The `.env` file is ignored by G
 Set the Python interpreter for the current shell:
 
 ```bash
-export PYTHON_BIN="$PWD/.venv/bin/python"
+export PYTHON_BIN="$PWD/.venv-kokoro/bin/python"
 ```
 
 ### 6. Start Vocalis

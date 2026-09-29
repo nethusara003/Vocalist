@@ -1,6 +1,7 @@
 # Dependencies and local environments
 node_modules/
 .venv/
+.venv-kokoro/
 venv/
 env/
 __pycache__/
