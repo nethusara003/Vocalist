@@ -2,10 +2,13 @@ const path = require("node:path");
 const { spawn } = require("node:child_process");
 const readline = require("node:readline");
 
-class TtsWorkerManager {
+class TTSService {
   constructor() {
+    this.platform = process.platform;
     this.python = process.env.PYTHON_BIN || "python3";
-    this.worker = path.join(__dirname, "..", "tts_worker.py");
+    this.worker = this.platform === "win32"
+      ? path.join(__dirname, "..", "windows_tts_worker.ps1")
+      : path.join(__dirname, "..", "tts_worker.py");
     this.child = null;
     this.ready = null;
     this.queue = Promise.resolve();
@@ -15,12 +18,29 @@ class TtsWorkerManager {
     this.voices = [];
   }
 
+  command() {
+    if (this.platform === "win32") {
+      return {
+        executable: process.env.POWERSHELL_PATH || "powershell.exe",
+        args: ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", this.worker],
+        env: { ...process.env }
+      };
+    }
+    return {
+      executable: this.python,
+      args: [this.worker, "--daemon"],
+      env: { ...process.env, PYTHONUNBUFFERED: "1" }
+    };
+  }
+
   start() {
     if (this.child && !this.child.killed) return this.ready;
     this.ready = new Promise((resolve, reject) => {
-      const child = spawn(this.python, [this.worker, "--daemon"], {
-        env: { ...process.env, PYTHONUNBUFFERED: "1" },
-        stdio: ["pipe", "pipe", "pipe"]
+      const command = this.command();
+      const child = spawn(command.executable, command.args, {
+        env: command.env,
+        stdio: ["pipe", "pipe", "pipe"],
+        windowsHide: true
       });
       this.child = child;
       const output = readline.createInterface({ input: child.stdout });
@@ -85,9 +105,39 @@ class TtsWorkerManager {
   status() {
     return { engine: this.engine, ready: Boolean(this.child), voices: this.voices };
   }
+
+  initialize() {
+    return this.start();
+  }
+
+  getHealth() {
+    return this.status();
+  }
+
+  getVoices() {
+    return this.voices;
+  }
+
+  generate(text, options, outputPath) {
+    return this.request(text, options, outputPath);
+  }
+
+  generateBatch(requests) {
+    return requests.reduce(
+      (sequence, request) => sequence.then(async (results) => [
+        ...results,
+        await this.generate(request.text, request.options || {}, request.output)
+      ]),
+      Promise.resolve([])
+    );
+  }
+
+  shutdown() {
+    return this.stop();
+  }
 }
 
-const manager = new TtsWorkerManager();
+const manager = new TTSService();
 
 async function start() {
   return manager.start();
@@ -101,4 +151,4 @@ function status() {
   return manager.status();
 }
 
-module.exports = { generateSpeech, start, stop: () => manager.stop(), status };
+module.exports = { TTSService, generateSpeech, start, stop: () => manager.stop(), status };

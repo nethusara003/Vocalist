@@ -33,9 +33,9 @@ Local Node backend
   ↓
 Replaceable TTS service abstraction
   ↓
-Persistent Python TTS worker
-  ↓
-Kokoro MLX (preferred) or macOS `say` fallback
+Platform TTS service abstraction
+  ├── macOS: persistent Kokoro MLX worker → `say` fallback
+  └── Windows: persistent SAPI PowerShell worker
   ↓
 WAV audio chunks
   ↓
@@ -44,19 +44,39 @@ FFmpeg merge and conversion
 Final WAV + MP3
 ```
 
+### Engine selection
+
+The frontend only uses the existing HTTP API. The backend selects the worker
+from the runtime platform:
+
+| Platform | Preferred local engine | Fallback |
+| --- | --- | --- |
+| macOS Apple Silicon | Kokoro MLX | macOS `say` |
+| Windows x64 | Windows SAPI | Installed SAPI voice set |
+
+Windows SAPI is the first Windows implementation because it is offline,
+already included with Windows, has no model redistribution requirement, and
+supports direct WAV output. Its voice quality depends on the voices installed
+on the user's system and is generally less neural/natural than Kokoro. A
+bundled Piper or ONNX Kokoro engine can be added behind the same service
+interface later without changing the frontend API.
+
 The browser plays the generated audio file. It does not use `speechSynthesis` for generated audio.
 
 The Node backend starts one Python worker when Vocalis starts. Kokoro MLX loads once and remains in memory while chunks and batch documents are processed sequentially. If the worker exits unexpectedly, the Node manager starts it again on the next request. The frontend uses the same API regardless of which local engine is active.
 
+## Supported platforms
+
+- macOS Apple Silicon
+- Windows x64
+
 ## Requirements
 
-- macOS on Apple Silicon is the primary supported environment
 - Node.js 20 or newer
 - npm
-- Python 3.10–3.12 for `kokoro-mlx`
-- FFmpeg
-- Optional: Kokoro MLX for neural local voices
-- Built-in macOS `say` and `afconvert` are used as a local fallback when Kokoro is not installed
+- FFmpeg for development
+- macOS: Python 3.10–3.12 for `kokoro-mlx` (optional fallback is `say` + `afconvert`)
+- Windows: PowerShell and Windows SAPI, which are built into supported Windows versions
 
 Kokoro model weights are downloaded by the local Python package on first use. Model weights are not included in this repository.
 
@@ -126,6 +146,54 @@ Open <http://localhost:8787>.
 
 Do not open `index.html` directly when generating audio; the local backend must be running.
 
+## Desktop application
+
+The Electron desktop shell starts the existing Node backend automatically, waits for
+`/api/health` to report that the persistent TTS worker is ready, and shuts down the
+backend and worker when the application closes. It uses a dynamically selected local
+port, so another development server on port 8787 does not block the desktop app.
+
+Run the development desktop application on macOS:
+
+```bash
+PYTHON_BIN="$PWD/.venv-kokoro/bin/python" npm run electron
+```
+
+Create an unpacked macOS development package:
+
+```bash
+PYTHON_BIN="$PWD/.venv-kokoro/bin/python" npm run build:mac
+```
+
+Create a DMG:
+
+```bash
+PYTHON_BIN="$PWD/.venv-kokoro/bin/python" npm run dist:mac
+```
+
+Build Windows x64 artifacts from a Windows or cross-build-capable environment:
+
+```bash
+npm run build:win
+npm run dist:win
+```
+
+The packaged shell does not require Node.js, npm, VS Code, or the project
+working directory. macOS Kokoro development/package builds still need a local
+supported Python environment and FFmpeg unless those resources are bundled as
+part of a separate runtime distribution. The optional
+`~/Library/Application Support/vocalis-local-tts/runtime.json` file can select
+those resources without hard-coding a developer path, but it is not required
+for the macOS `say` fallback.
+
+Windows uses the persistent PowerShell SAPI worker. It requires no Python,
+Kokoro, or model download. The Windows package includes an x64 FFmpeg binary
+under its application resources, so end users do not need to install FFmpeg.
+Development builds look for `FFMPEG_PATH`, the packaged
+`resources/ffmpeg/win-x64/ffmpeg.exe`, then `ffmpeg` on `PATH`. The bundled
+FFmpeg build is distributed under its upstream LGPL/GPL terms; review the
+upstream license and build source before redistributing the installer.
+
 ## Usage
 
 1. Enter or paste text into the editor.
@@ -153,17 +221,25 @@ Do not open `index.html` directly when generating audio; the local backend must 
 │   └── .gitkeep
 └── server/
     ├── server.js
-    ├── tts_worker.py          # persistent newline-delimited TTS worker
+    ├── tts_worker.py          # macOS Kokoro/say persistent worker
+    ├── windows_tts_worker.ps1 # Windows SAPI persistent worker
     ├── services/
     │   └── ttsService.js      # worker lifecycle and request queue
     └── utils/
         ├── audioMerger.js
         └── textChunker.js
+├── electron/
+│   ├── main.js
+│   └── loading.html
+└── resources/
+    └── ffmpeg/
+        └── win-x64/ffmpeg.exe  # included in Windows packaging
 ```
 
 ### Backend endpoints
 
 - `GET /api/health`
+- `GET /api/diagnostics`
 - `GET /api/voices`
 - `POST /api/tts/generate`
 - `POST /api/batch/generate`

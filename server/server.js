@@ -8,8 +8,8 @@ const { chunkText } = require("./utils/textChunker");
 const { generateSpeech, start: startTts, stop: stopTts, status: ttsStatus } = require("./services/ttsService");
 const { mergeWavFiles, convertToMp3 } = require("./utils/audioMerger");
 
-const root = path.join(__dirname, "..");
-const outputDir = path.join(root, "output");
+const root = process.env.VOCALIS_APP_ROOT || path.join(__dirname, "..");
+const outputDir = process.env.VOCALIS_DATA_DIR || path.join(root, "output");
 fs.mkdirSync(outputDir, { recursive: true });
 const port = Number(process.env.PORT || 8787);
 
@@ -31,15 +31,35 @@ function safeName(name) {
 function ffmpegAvailable() {
   return Boolean(spawnSync(process.env.FFMPEG_PATH || "ffmpeg", ["-version"], { stdio: "ignore" }).status === 0);
 }
+function diagnostics() {
+  const ffmpegPath = process.env.FFMPEG_PATH || "ffmpeg";
+  return {
+    platform: process.platform,
+    architecture: process.arch,
+    engine: ttsStatus().engine,
+    ready: ttsStatus().ready,
+    voices: ttsStatus().voices,
+    voiceCount: ttsStatus().voices.length,
+    ffmpeg: ffmpegAvailable(),
+    ffmpegPath,
+    backend: "ready",
+    fallback: process.platform === "darwin" ? "macos-say" : process.platform === "win32" ? "windows-sapi" : "unavailable"
+  };
+}
 function localVoices() {
+  if (process.platform !== "darwin") return [];
   const output = spawnSync("say", ["-v", "?"], { encoding: "utf8" });
   const voices = output.status === 0 ? output.stdout.split("\n").map((line) => line.trim().match(/^(.+?)\s+([a-z]{2}(?:[-_][A-Z]{2})?)\s+#/i)).filter(Boolean).map((match) => ({ name: match[1].trim(), lang: match[2] })) : [];
-  return [...[{ name: "af_heart", lang: "en-us", engine: "Kokoro" }], ...voices];
+  return voices.map(({ name, lang }) => ({ name, lang, engine: "macos-say" }));
 }
 async function generateDocument(payload) {
   const text = String(payload.text || "").trim();
   if (!text) throw new Error("Text cannot be empty.");
-  if (!ffmpegAvailable()) throw new Error("FFmpeg is required for MP3 conversion and multi-chunk merging. Install it with: brew install ffmpeg");
+  if (!ffmpegAvailable()) {
+    throw new Error(process.platform === "win32"
+      ? "Bundled FFmpeg is unavailable. Reinstall Vocalis or configure FFMPEG_PATH."
+      : "FFmpeg is required for MP3 conversion and multi-chunk merging. Install it with: brew install ffmpeg");
+  }
   const id = crypto.randomUUID();
   const base = safeName(payload.filename || "vocalis-document");
   const chunks = chunkText(text);
@@ -97,7 +117,8 @@ const server = http.createServer(async (req, res) => {
   if (req.method === "OPTIONS") { res.writeHead(204, { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "Content-Type" }); return res.end(); }
   try {
     if (req.url === "/api/health") return json(res, 200, { ok: true, ffmpeg: ffmpegAvailable(), ...ttsStatus() });
-    if (req.method === "GET" && req.url === "/api/voices") return json(res, 200, { voices: ttsStatus().voices.length ? ttsStatus().voices.map((name) => ({ name, lang: "local", engine: "Kokoro MLX" })) : localVoices() });
+    if (req.method === "GET" && req.url === "/api/diagnostics") return json(res, 200, diagnostics());
+    if (req.method === "GET" && req.url === "/api/voices") return json(res, 200, { voices: ttsStatus().voices.length ? ttsStatus().voices.map((name) => ({ name, lang: "local", engine: ttsStatus().engine })) : localVoices() });
     if (req.method === "POST" && req.url === "/api/tts/generate") return json(res, 200, await generateDocument(await readBody(req)));
     if (req.method === "POST" && req.url === "/api/batch/generate") {
       const payload = await readBody(req), results = [];

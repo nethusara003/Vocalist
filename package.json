@@ -3,11 +3,81 @@
   "private": true,
   "version": "1.0.0",
   "type": "commonjs",
+  "main": "electron/main.js",
+  "description": "Local desktop text-to-speech application",
   "scripts": {
     "start": "node server/server.js",
-    "dev": "node server/server.js"
+    "dev": "node server/server.js",
+    "electron": "electron electron/main.js",
+    "electron:build": "npm run build:mac",
+    "build:mac": "electron-builder --mac --dir",
+    "dist:mac": "electron-builder --mac dmg",
+    "build:win": "electron-builder --win --x64 --dir",
+    "dist:win": "electron-builder --win=nsis --x64",
+    "build:all": "npm run build:mac && npm run build:win"
   },
   "dependencies": {
     "archiver": "^7.0.1"
+  },
+  "build": {
+    "appId": "com.vocalis.tts",
+    "productName": "Vocalis",
+    "asar": true,
+    "asarUnpack": [
+      "server/**",
+      "electron/**"
+    ],
+    "files": [
+      "index.html",
+      "style.css",
+      "script.js",
+      "server/**/*",
+      "electron/**/*",
+      "package.json",
+      "LICENSE",
+      "README.md"
+    ],
+    "mac": {
+      "target": [
+        "dir",
+        "dmg"
+      ],
+      "artifactName": "Vocalis-${version}-arm64.${ext}",
+      "category": "public.app-category.productivity"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "Vocalis-${version}-win-x64.${ext}",
+      "executableName": "Vocalis",
+      "extraResources": [
+        {
+          "from": "resources/ffmpeg/win-x64",
+          "to": "ffmpeg/win-x64",
+          "filter": [
+            "ffmpeg.exe"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    },
+    "directories": {
+      "output": "release"
+    }
+  },
+  "devDependencies": {
+    "electron": "^44.4.5",
+    "electron-builder": "^26.15.3"
   }
 }

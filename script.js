@@ -14,7 +14,8 @@
     downloadWav: $("downloadWav"), downloadMp3: $("downloadMp3"), audioDuration: $("audioDuration"),
     audioFormat: $("audioFormat"), batchInput: $("batchFileInput"), batchList: $("batchList"),
     generateAll: $("generateAll"), downloadAll: $("downloadAll"), batchProgress: $("batchProgress"),
-    batchStatus: $("batchStatus"), batchPercentage: $("batchPercentage"), batchFill: $("batchFill")
+    batchStatus: $("batchStatus"), batchPercentage: $("batchPercentage"), batchFill: $("batchFill"),
+    diagnostics: $("diagnosticsGrid")
   };
   let generated = null, chunks = [], currentChunk = 0, batchDocuments = [], batchResults = [];
   const savedTexts = JSON.parse(localStorage.getItem("vocalisSaved") || "[]");
@@ -41,7 +42,7 @@
   function updateProgress(value) { const percent = Math.max(0, Math.min(100, Math.round(value))); els.percent.textContent = `${percent}%`; els.fill.style.width = `${percent}%`; document.querySelector('[role="progressbar"]').setAttribute("aria-valuenow", percent); }
   function setGenerationProgress(chunk, total, detail = "") { els.chunk.textContent = total ? `Chunk ${chunk} of ${total}` : detail; updateProgress(total ? (chunk / total) * 100 : 0); }
   function splitForUi(text) { return text.split(/(?<=[.!?])\s+/).filter(Boolean); }
-  function selectedVoice() { return els.voice.value || "af_heart|||en-us"; }
+  function selectedVoice() { return els.voice.value || ""; }
   async function loadVoices() {
     try {
       const { voices } = await api("/api/voices");
@@ -49,7 +50,22 @@
       if (savedSettings.voice && [...els.voice.options].some((option) => option.value === savedSettings.voice)) els.voice.value = savedSettings.voice;
       const langs = [...new Set(voices.map((voice) => voice.lang))].sort();
       els.language.innerHTML = `<option value="all">All languages</option>${langs.map((lang) => `<option value="${lang}">${lang}</option>`).join("")}`;
-    } catch (error) { els.note.textContent = `Start the local backend to load voices and generate audio: ${error.message}`; els.voice.innerHTML = '<option value="af_heart|||en-us">af_heart — en-us (Kokoro)</option>'; }
+    } catch (error) { els.note.textContent = `Start the local backend to load voices and generate audio: ${error.message}`; els.voice.innerHTML = '<option value="">No voices available</option>'; }
+  }
+  async function loadDiagnostics() {
+    try {
+      const diagnostic = await api("/api/diagnostics");
+      const voiceSummary = diagnostic.voiceCount ? `${diagnostic.voiceCount} available` : "None detected";
+      els.diagnostics.innerHTML = [
+        ["Platform", `${diagnostic.platform} · ${diagnostic.architecture}`],
+        ["TTS engine", diagnostic.engine],
+        ["Voices", voiceSummary],
+        ["FFmpeg", diagnostic.ffmpeg ? "Available" : "Unavailable"],
+        ["Backend", diagnostic.backend]
+      ].map(([label, value]) => `<div><span>${label}</span><strong>${value}</strong></div>`).join("");
+    } catch (error) {
+      els.diagnostics.innerHTML = `<span>Diagnostics unavailable: ${error.message}</span>`;
+    }
   }
   function options() { return { voice: selectedVoice(), language: els.language.value === "all" ? "en-us" : els.language.value, rate: Number(els.rate.value), pitch: Number(els.pitch.value), volume: Number(els.volume.value) }; }
   function setAudio(result) {
@@ -98,7 +114,7 @@
   }
   function newDocument() { els.text.value = ""; els.title.textContent = "Untitled document"; generated = null; els.audioPanel.hidden = true; updateCounts(); updateProgress(0); setStatus("Ready to listen"); }
 
-  ["rate", "pitch", "volume"].forEach((key) => { if (savedSettings[key] !== undefined) els[key].value = savedSettings[key]; }); if (savedSettings.theme === "light") document.body.classList.add("light"); updateRangeLabels(); updateCounts(); loadVoices();
+  ["rate", "pitch", "volume"].forEach((key) => { if (savedSettings[key] !== undefined) els[key].value = savedSettings[key]; }); if (savedSettings.theme === "light") document.body.classList.add("light"); updateRangeLabels(); updateCounts(); loadVoices(); loadDiagnostics();
   els.text.addEventListener("input", () => { updateCounts(); els.title.textContent = els.text.value.trim().slice(0, 35) || "Untitled document"; });
   [els.rate, els.pitch, els.volume].forEach((input) => input.addEventListener("input", updateRangeLabels)); els.voice.addEventListener("change", persistSettings);
   els.generate.addEventListener("click", generateAudio); els.play.addEventListener("click", () => { if (els.audio.paused) playAudio(); else { els.audio.pause(); setStatus("Paused", "paused"); } }); els.stop.addEventListener("click", stopAudio); els.restart.addEventListener("click", restartAudio);
