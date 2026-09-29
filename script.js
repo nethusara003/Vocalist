@@ -68,11 +68,20 @@
     }
   }
   function options() { return { voice: selectedVoice(), language: els.language.value === "all" ? "en-us" : els.language.value, rate: Number(els.rate.value), pitch: Number(els.pitch.value), volume: Number(els.volume.value) }; }
+  function downloadFile(url, filename) {
+    const link = document.createElement("a");
+    link.href = apiUrl(url);
+    link.download = filename;
+    link.hidden = true;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+  }
   function setAudio(result) {
-    generated = result; const wavUrl = apiUrl(result.wav), mp3Url = apiUrl(result.mp3);
+    generated = result; const mp3Url = apiUrl(result.mp3);
     els.audioPanel.hidden = false; els.audio.src = mp3Url; els.audio.load(); els.audioStatus.textContent = "Audio ready"; els.audioFormat.textContent = `${result.chunks} chunk${result.chunks === 1 ? "" : "s"} · WAV + MP3`;
     els.chunk.textContent = `${result.chunks} chunk${result.chunks === 1 ? "" : "s"} generated`;
-    els.downloadWav.disabled = false; els.downloadMp3.disabled = false; els.downloadWav.onclick = () => window.open(wavUrl, "_blank"); els.downloadMp3.onclick = () => window.open(mp3Url, "_blank");
+    els.downloadWav.disabled = false; els.downloadMp3.disabled = false; els.downloadWav.onclick = () => downloadFile(result.wav, `${result.filename}.wav`); els.downloadMp3.onclick = () => downloadFile(result.mp3, `${result.filename}.mp3`);
     els.playbackDetail.textContent = result.filename; setStatus("Finished", "finished"); updateProgress(100);
   }
   async function generateAudio() {
@@ -124,6 +133,6 @@
   $("copyText").addEventListener("click", async () => { try { await navigator.clipboard.writeText(els.text.value); toast("Text copied."); } catch { toast("Copy permission was denied."); } }); $("pasteText").addEventListener("click", async () => { try { els.text.value = await navigator.clipboard.readText(); els.text.dispatchEvent(new Event("input")); } catch { toast("Paste permission was denied."); } });
   $("fileInput").addEventListener("change", (event) => { const file = event.target.files[0]; if (!file) return; const reader = new FileReader(); reader.onload = () => { els.text.value = reader.result; els.text.dispatchEvent(new Event("input")); }; reader.readAsText(file); event.target.value = ""; });
   els.batchInput.addEventListener("change", (event) => { batchDocuments = [...batchDocuments, ...[...event.target.files].map((file) => ({ name: file.name, text: null }))]; let pending = batchDocuments.filter((document) => !document.text); Promise.all(pending.map((document) => new Promise((resolve) => { const reader = new FileReader(); reader.onload = () => { document.text = reader.result; resolve(); }; reader.readAsText([...event.target.files].find((file) => file.name === document.name)); }))).then(renderBatch); event.target.value = ""; });
-  els.batchList.addEventListener("click", (event) => { const download = event.target.dataset.download; if (download) window.open(apiUrl(download), "_blank"); const retry = event.target.dataset.retry; if (retry) { batchResults[retry] = { status: "queued" }; generateAll(); } }); els.generateAll.addEventListener("click", generateAll); els.downloadAll.addEventListener("click", downloadAll);
+  els.batchList.addEventListener("click", (event) => { const download = event.target.dataset.download; if (download) downloadFile(download, download.endsWith(".wav") ? "Vocalis_Output.wav" : "Vocalis_Output.mp3"); const retry = event.target.dataset.retry; if (retry) { batchResults[retry] = { status: "queued" }; generateAll(); } }); els.generateAll.addEventListener("click", generateAll); els.downloadAll.addEventListener("click", downloadAll);
   $("themeToggle").addEventListener("click", () => { document.body.classList.toggle("light"); persistSettings(); }); $("readingMode").addEventListener("click", () => { document.body.classList.toggle("reading-mode"); els.text.focus(); }); $("menuButton").addEventListener("click", () => $("sidebar").classList.toggle("open"));
 })();

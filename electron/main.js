@@ -1,4 +1,4 @@
-const { app, BrowserWindow } = require("electron");
+const { app, BrowserWindow, dialog } = require("electron");
 const fs = require("node:fs");
 const http = require("node:http");
 const net = require("node:net");
@@ -21,9 +21,42 @@ let backend;
 let backendPort;
 let mainWindow;
 let shuttingDown = false;
+let downloadHandlerRegistered = false;
 
 function existingFile(...paths) {
   return paths.find((candidate) => fs.existsSync(candidate));
+}
+
+function registerDownloadHandler() {
+  if (downloadHandlerRegistered) return;
+  downloadHandlerRegistered = true;
+  mainWindow.webContents.session.on("will-download", (event, downloadItem) => {
+    downloadItem.pause();
+    const filename = downloadItem.getFilename();
+    dialog.showSaveDialog(mainWindow, {
+      title: "Save generated audio",
+      defaultPath: path.join(app.getPath("downloads"), filename),
+      filters: [{ name: "Audio", extensions: [path.extname(filename).slice(1) || "audio"] }]
+    }).then(({ canceled, filePath }) => {
+      if (canceled || !filePath) {
+        downloadItem.cancel();
+        return;
+      }
+      downloadItem.setSavePath(filePath);
+      downloadItem.once("done", (_event, state) => {
+        if (state !== "completed") {
+          log(`Download failed ${filePath} (${state})`);
+          return;
+        }
+        const size = fs.statSync(filePath).size;
+        log(`Download saved ${filePath} (${size} bytes)`);
+      });
+      downloadItem.resume();
+    }).catch((error) => {
+      log(`Save dialog error: ${error.stack || error.message}`);
+      downloadItem.cancel();
+    });
+  });
 }
 
 function runtimeConfig() {
@@ -164,6 +197,8 @@ async function createWindow() {
     show: false,
     webPreferences: { contextIsolation: true, nodeIntegration: false }
   });
+  mainWindow.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+  registerDownloadHandler();
   mainWindow.loadFile(loadingPage).catch((error) => log(`Loading page error: ${error.message}`));
   mainWindow.show();
   try {
