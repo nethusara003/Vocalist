@@ -33,6 +33,8 @@ Local Node backend
   ↓
 Replaceable TTS service abstraction
   ↓
+Persistent Python TTS worker
+  ↓
 Kokoro MLX (preferred) or macOS `say` fallback
   ↓
 WAV audio chunks
@@ -43,6 +45,8 @@ Final WAV + MP3
 ```
 
 The browser plays the generated audio file. It does not use `speechSynthesis` for generated audio.
+
+The Node backend starts one Python worker when Vocalis starts. Kokoro MLX loads once and remains in memory while chunks and batch documents are processed sequentially. If the worker exits unexpectedly, the Node manager starts it again on the next request. The frontend uses the same API regardless of which local engine is active.
 
 ## Requirements
 
@@ -149,9 +153,9 @@ Do not open `index.html` directly when generating audio; the local backend must 
 │   └── .gitkeep
 └── server/
     ├── server.js
-    ├── tts_worker.py
+    ├── tts_worker.py          # persistent newline-delimited TTS worker
     ├── services/
-    │   └── ttsService.js
+    │   └── ttsService.js      # worker lifecycle and request queue
     └── utils/
         ├── audioMerger.js
         └── textChunker.js

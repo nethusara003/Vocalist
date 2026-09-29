@@ -5,7 +5,7 @@ const crypto = require("node:crypto");
 const { spawnSync } = require("node:child_process");
 const archiver = require("archiver");
 const { chunkText } = require("./utils/textChunker");
-const { generateSpeech } = require("./services/ttsService");
+const { generateSpeech, start: startTts, stop: stopTts, status: ttsStatus } = require("./services/ttsService");
 const { mergeWavFiles, convertToMp3 } = require("./utils/audioMerger");
 
 const root = path.join(__dirname, "..");
@@ -44,13 +44,16 @@ async function generateDocument(payload) {
   const base = safeName(payload.filename || "vocalis-document");
   const chunks = chunkText(text);
   const chunkFiles = [];
+  const chunkTimings = [];
+  const documentStarted = process.hrtime.bigint();
   try {
     for (let index = 0; index < chunks.length; index += 1) {
       const chunkPath = path.join(outputDir, `${id}-${index}.wav`);
       let lastError;
       for (let attempt = 1; attempt <= 2; attempt += 1) {
         try {
-          await generateSpeech(chunks[index], payload.options || {}, chunkPath);
+          const result = await generateSpeech(chunks[index], payload.options || {}, chunkPath);
+          chunkTimings.push(result.durationMs);
           lastError = null;
           break;
         } catch (error) {
@@ -65,7 +68,16 @@ async function generateDocument(payload) {
     const mp3Path = path.join(outputDir, `${id}-${base}.mp3`);
     await mergeWavFiles(chunkFiles, wavPath);
     await convertToMp3(wavPath, mp3Path);
-    return { id, filename: base, chunks: chunks.length, wav: `/files/${path.basename(wavPath)}`, mp3: `/files/${path.basename(mp3Path)}` };
+    return {
+      id,
+      filename: base,
+      chunks: chunks.length,
+      chunkTimingsMs: chunkTimings,
+      totalGenerationMs: Number(process.hrtime.bigint() - documentStarted) / 1e6,
+      engine: ttsStatus().engine,
+      wav: `/files/${path.basename(wavPath)}`,
+      mp3: `/files/${path.basename(mp3Path)}`
+    };
   } finally {
     await Promise.all(chunkFiles.map((file) => fs.promises.rm(file, { force: true })));
   }
@@ -84,8 +96,8 @@ function createZip(files, res) {
 const server = http.createServer(async (req, res) => {
   if (req.method === "OPTIONS") { res.writeHead(204, { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "Content-Type" }); return res.end(); }
   try {
-    if (req.url === "/api/health") return json(res, 200, { ok: true, ffmpeg: ffmpegAvailable(), engine: process.env.VOCALIS_TTS_ENGINE || "kokoro-then-macos-say" });
-    if (req.method === "GET" && req.url === "/api/voices") return json(res, 200, { voices: localVoices() });
+    if (req.url === "/api/health") return json(res, 200, { ok: true, ffmpeg: ffmpegAvailable(), ...ttsStatus() });
+    if (req.method === "GET" && req.url === "/api/voices") return json(res, 200, { voices: ttsStatus().voices.length ? ttsStatus().voices.map((name) => ({ name, lang: "local", engine: "Kokoro MLX" })) : localVoices() });
     if (req.method === "POST" && req.url === "/api/tts/generate") return json(res, 200, await generateDocument(await readBody(req)));
     if (req.method === "POST" && req.url === "/api/batch/generate") {
       const payload = await readBody(req), results = [];
@@ -121,4 +133,11 @@ const server = http.createServer(async (req, res) => {
     res.writeHead(200, { "Content-Type": types[ext] || "application/octet-stream" }); fs.createReadStream(filePath).pipe(res);
   } catch (error) { json(res, 500, { error: error.message }); }
 });
-server.listen(port, () => console.log(`Vocalis local server: http://localhost:${port}`));
+startTts()
+  .then(() => server.listen(port, () => console.log(`Vocalis local server: http://localhost:${port} (${ttsStatus().engine})`)))
+  .catch((error) => {
+    console.error(`Unable to start local TTS worker: ${error.message}`);
+    process.exitCode = 1;
+  });
+process.on("SIGINT", async () => { await stopTts(); process.exit(0); });
+process.on("SIGTERM", async () => { await stopTts(); process.exit(0); });
