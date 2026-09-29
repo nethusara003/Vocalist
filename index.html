@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#0b1120">
+  <title>Vocalis — Text to Speech</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar" id="sidebar" aria-label="Document navigation">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">◒</span>
+        <span>Vocalis</span>
+      </div>
+      <button class="new-document-button" id="newDocument" type="button"><span>＋</span> New document</button>
+      <nav class="document-nav">
+        <p class="nav-label">Library</p>
+        <button class="nav-item active" type="button" data-library="recent"><span>◷</span> Recent texts <span class="nav-count" id="recentCount">0</span></button>
+        <button class="nav-item" type="button" data-library="saved"><span>▱</span> Saved texts <span class="nav-count" id="savedCount">0</span></button>
+      </nav>
+      <div class="sidebar-footer">
+        <p>Private by design.<br>Your text never leaves this browser.</p>
+      </div>
+    </aside>
+
+    <main class="main-content">
+      <header class="topbar">
+        <button class="icon-button mobile-menu" id="menuButton" type="button" aria-label="Open navigation">☰</button>
+        <div class="breadcrumb"><span>Workspace</span><b>/</b><strong id="documentTitle">Untitled document</strong></div>
+        <div class="topbar-actions">
+          <button class="topbar-button" id="readingMode" type="button"><span>◉</span> Reading mode</button>
+          <button class="icon-button" id="themeToggle" type="button" aria-label="Toggle theme">☼</button>
+        </div>
+      </header>
+
+      <section class="workspace">
+        <div class="editor-heading">
+          <div>
+            <p class="eyebrow">Text to speech studio</p>
+            <h1>Bring your words to life<span class="accent-dot">.</span></h1>
+            <p class="subheading">Listen, focus, and make every word count.</p>
+          </div>
+          <div class="document-actions">
+            <button class="secondary-button" id="saveText" type="button">☆ <span>Save</span></button>
+            <button class="secondary-button" id="clearText" type="button">⌫ <span>Clear</span></button>
+            <button class="generate-button" id="generateAudio" type="button">◎ <span>Generate audio</span></button>
+          </div>
+        </div>
+
+        <div class="editor-card">
+          <label class="sr-only" for="textInput">Text to read aloud</label>
+          <textarea id="textInput" spellcheck="true" placeholder="Type or paste your text here..."></textarea>
+          <div class="editor-tools">
+            <div class="counter-group">
+              <span id="wordCount">0 words</span><span class="separator">·</span><span id="characterCount">0 characters</span>
+            </div>
+            <div class="text-actions">
+              <button class="text-action" id="pasteText" type="button">↧ Paste</button>
+              <button class="text-action" id="copyText" type="button">▣ Copy</button>
+              <label class="text-action file-label" for="fileInput">↥ Import .txt</label>
+              <input id="fileInput" type="file" accept=".txt,text/plain">
+              <button class="text-action" id="exportText" type="button">↥ Export</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="status-row">
+          <div class="status-pill"><span class="status-dot ready" id="statusDot"></span><span id="statusText">Ready to listen</span></div>
+          <span id="chunkLabel">No text loaded</span>
+          <span class="percentage" id="percentage">0%</span>
+        </div>
+        <div class="progress-track" aria-label="Reading progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+          <div class="progress-fill" id="progressFill"></div>
+        </div>
+
+        <section class="settings-card" aria-label="Speech settings">
+          <div class="setting">
+            <label for="voiceSelect">Voice</label>
+            <select id="voiceSelect"><option>Loading voices...</option></select>
+          </div>
+          <div class="setting">
+            <label for="languageSelect">Language</label>
+            <select id="languageSelect"><option value="all">All languages</option></select>
+          </div>
+          <div class="setting range-setting">
+            <label for="rateRange">Speed <output id="rateValue">1.0x</output></label>
+            <input id="rateRange" type="range" min="0.5" max="2" step="0.1" value="1">
+          </div>
+          <div class="setting range-setting">
+            <label for="pitchRange">Pitch <output id="pitchValue">1.0</output></label>
+            <input id="pitchRange" type="range" min="0" max="2" step="0.1" value="1">
+          </div>
+          <div class="setting range-setting">
+            <label for="volumeRange">Volume <output id="volumeValue">100%</output></label>
+            <input id="volumeRange" type="range" min="0" max="1" step="0.05" value="1">
+          </div>
+        </section>
+
+        <div class="audio-panel" id="audioPanel" hidden>
+        <div class="audio-panel-heading">
+          <div><p class="eyebrow">Generated audio</p><strong id="audioStatus">Ready to generate</strong></div>
+          <div class="audio-downloads">
+            <button class="secondary-button" id="downloadWav" type="button" disabled>↓ WAV</button>
+            <button class="secondary-button" id="downloadMp3" type="button" disabled>↓ MP3</button>
+          </div>
+        </div>
+        <audio id="audioPlayer" controls preload="metadata"></audio>
+        <div class="audio-meta"><span id="audioDuration">No audio generated yet</span><span id="audioFormat"></span></div>
+        </div>
+        <div class="batch-panel">
+        <div class="batch-heading"><div><p class="eyebrow">Batch generation</p><strong>Generate multiple documents</strong></div><label class="secondary-button file-label" for="batchFileInput">＋ Add .txt files</label><input id="batchFileInput" type="file" accept=".txt,text/plain" multiple></div>
+        <div class="batch-progress" id="batchProgress" hidden><div class="batch-progress-label"><span id="batchStatus">Waiting</span><span id="batchPercentage">0%</span></div><div class="progress-track"><div class="progress-fill" id="batchFill"></div></div></div>
+        <div class="batch-list" id="batchList"><p class="empty-batch">Add chapters or documents to generate them sequentially.</p></div>
+        <div class="batch-actions"><button class="generate-button" id="generateAll" type="button" disabled>◎ Generate all</button><button class="secondary-button" id="downloadAll" type="button" disabled>↓ Download all (.zip)</button></div>
+        </div>
+        <div class="support-note" id="supportNote" role="status"></div>
+      </section>
+
+      <footer class="footer"><span>◒</span> Powered by your local TTS engine <span class="footer-separator">·</span> No data leaves your device</footer>
+    </main>
+  </div>
+
+  <div class="playback-bar">
+    <div class="playback-info">
+      <span class="wave-icon" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>
+      <div><strong id="playbackTitle">Ready to read</strong><span id="playbackDetail">Add text to begin</span></div>
+    </div>
+    <div class="playback-controls">
+      <button class="playback-button" id="previousButton" type="button" aria-label="Previous chunk">◀</button>
+      <button class="playback-button restart" id="restartButton" type="button" aria-label="Restart reading">↻</button>
+      <button class="play-button" id="playButton" type="button" aria-label="Speak or resume"><span id="playIcon">▶</span></button>
+      <button class="playback-button" id="stopButton" type="button" aria-label="Stop reading">■</button>
+      <button class="playback-button" id="nextButton" type="button" aria-label="Next chunk">▶</button>
+    </div>
+    <div class="playback-hint"><kbd>Space</kbd> Play / pause</div>
+  </div>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <script src="script.js"></script>
+</body>
+</html>

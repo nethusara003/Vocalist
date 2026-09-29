@@ -1,0 +1,13 @@
+{
+  "name": "vocalis-local-tts",
+  "private": true,
+  "version": "1.0.0",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server/server.js",
+    "dev": "node server/server.js"
+  },
+  "dependencies": {
+    "archiver": "^7.0.1"
+  }
+}

@@ -1,0 +1,28 @@
+# Dependencies and local environments
+node_modules/
+.venv/
+venv/
+env/
+__pycache__/
+*.pyc
+
+# Environment and machine-specific configuration
+.env
+.env.*
+!.env.example
+.DS_Store
+*.log
+
+# Build and generated artifacts
+dist/
+build/
+output/*
+!output/.gitkeep
+*.wav
+*.mp3
+*.zip
+
+# Local editor and tooling files
+.vscode/*
+!.vscode/extensions.json
+.idea/
