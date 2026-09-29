@@ -44,21 +44,13 @@ function runtimeEnvironment() {
       path.join(process.resourcesPath, "python", "bin", "python")
     )
     || "python3";
-  const ffmpeg = process.env.FFMPEG_PATH
-    || config.ffmpegPath
-    || existingFile(
-      path.join(process.resourcesPath, "ffmpeg", "bin", "ffmpeg"),
-      path.join(process.resourcesPath, "ffmpeg", "win-x64", "ffmpeg.exe"),
-      "/opt/homebrew/bin/ffmpeg",
-      "/usr/local/bin/ffmpeg"
-    )
-    || "ffmpeg";
+  const ffmpegOverride = process.env.FFMPEG_PATH || config.ffmpegPath;
   return {
     ...process.env,
     ELECTRON_RUN_AS_NODE: "1",
     NODE_PATH: path.join(projectRoot, "node_modules"),
     PYTHON_BIN: python,
-    FFMPEG_PATH: ffmpeg,
+    ...(ffmpegOverride ? { FFMPEG_PATH: ffmpegOverride } : {}),
     VOCALIS_APP_ROOT: projectRoot,
     VOCALIS_DATA_DIR: path.join(app.getPath("userData"), "output"),
     PORT: String(backendPort),

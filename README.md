@@ -189,8 +189,10 @@ for the macOS `say` fallback.
 Windows uses the persistent PowerShell SAPI worker. It requires no Python,
 Kokoro, or model download. The Windows package includes an x64 FFmpeg binary
 under its application resources, so end users do not need to install FFmpeg.
-Development builds look for `FFMPEG_PATH`, the packaged
-`resources/ffmpeg/win-x64/ffmpeg.exe`, then `ffmpeg` on `PATH`. The bundled
+`FFMPEG_PATH` is an optional override. Development builds automatically resolve
+the project resource at `resources/ffmpeg/win-x64/ffmpeg.exe` on Windows, while
+packaged builds resolve the bundled resource beneath Electron's
+`process.resourcesPath`. The resolver then falls back to `ffmpeg` on `PATH`. The bundled
 FFmpeg build is distributed under its upstream LGPL/GPL terms; review the
 upstream license and build source before redistributing the installer.
 

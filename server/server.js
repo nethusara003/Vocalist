@@ -7,6 +7,7 @@ const archiver = require("archiver");
 const { chunkText } = require("./utils/textChunker");
 const { generateSpeech, start: startTts, stop: stopTts, status: ttsStatus } = require("./services/ttsService");
 const { mergeWavFiles, convertToMp3 } = require("./utils/audioMerger");
+const { resolveFfmpegPath } = require("./utils/ffmpegPath");
 
 const root = process.env.VOCALIS_APP_ROOT || path.join(__dirname, "..");
 const outputDir = process.env.VOCALIS_DATA_DIR || path.join(root, "output");
@@ -29,10 +30,10 @@ function safeName(name) {
   return (String(name || "vocalis-document").replace(/[^a-z0-9._-]+/gi, "-").replace(/^-+|-+$/g, "").slice(0, 90) || "vocalis-document");
 }
 function ffmpegAvailable() {
-  return Boolean(spawnSync(process.env.FFMPEG_PATH || "ffmpeg", ["-version"], { stdio: "ignore" }).status === 0);
+  return Boolean(spawnSync(resolveFfmpegPath(), ["-version"], { stdio: "ignore" }).status === 0);
 }
 function diagnostics() {
-  const ffmpegPath = process.env.FFMPEG_PATH || "ffmpeg";
+  const ffmpegPath = resolveFfmpegPath();
   return {
     platform: process.platform,
     architecture: process.arch,
