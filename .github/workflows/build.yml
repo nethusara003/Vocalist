@@ -1,0 +1,80 @@
+name: Electron Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  macos:
+    name: macOS ARM64
+    runs-on: macos-14
+    steps:
+      - name: Check out repository with Git LFS
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Set up Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build macOS artifact
+        run: npm run dist:mac
+
+      - name: Upload macOS artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: vocalis-macos-arm64
+          path: release/*
+          if-no-files-found: error
+
+  windows:
+    name: Windows x64
+    runs-on: windows-latest
+    steps:
+      - name: Check out repository with Git LFS
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Set up Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify bundled FFmpeg
+        shell: pwsh
+        run: |
+          git lfs pull
+          $ffmpeg = Get-Item resources/ffmpeg/win-x64/ffmpeg.exe
+          if ($ffmpeg.Length -le 1MB) {
+            throw "FFmpeg is still an LFS pointer or is incomplete."
+          }
+          $bytes = [System.IO.File]::ReadAllBytes($ffmpeg.FullName)
+          if ($bytes[0] -ne 0x4D -or $bytes[1] -ne 0x5A) {
+            throw "Bundled FFmpeg is not a Windows PE executable."
+          }
+
+      - name: Build Windows installer
+        run: npm run dist:win
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: vocalis-windows-x64
+          path: release/*
+          if-no-files-found: error

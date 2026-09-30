@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository with Git LFS
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Set up Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify LFS FFmpeg object
+        shell: bash
+        run: |
+          git lfs pull
+          test "$(wc -c < resources/ffmpeg/win-x64/ffmpeg.exe)" -gt 1000000
+          test "$(head -c 2 resources/ffmpeg/win-x64/ffmpeg.exe)" = "MZ"
+
+      - name: Check JavaScript syntax
+        run: >
+          node --check script.js &&
+          node --check electron/main.js &&
+          node --check server/server.js &&
+          node --check server/services/ttsService.js &&
+          node --check server/utils/audioMerger.js &&
+          node --check server/utils/ffmpegPath.js &&
+          node --check scripts/ci-validation.js
+
+      - name: Check diff whitespace
+        run: git diff --check
+
+      - name: Run security and regression validation
+        run: node scripts/ci-validation.js
+
+      - name: Audit dependencies
+        run: npm audit --audit-level=high
