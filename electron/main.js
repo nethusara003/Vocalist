@@ -91,15 +91,38 @@ function runtimeEnvironment() {
   };
 }
 
-function findFreePort() {
-  return new Promise((resolve, reject) => {
+// The renderer is served over HTTP, so its localStorage is scoped to the
+// origin http://127.0.0.1:<port>. A random port on every launch meant a new
+// origin (and therefore an empty localStorage) on every restart, losing
+// Recent/Saved/settings. Use a stable port so the origin — and localStorage —
+// survives restarts. Dev and packaged builds use different stable ports so
+// their localStorage namespaces stay separate: dev experiments (and automated
+// QA, which clears storage) can never touch the packaged app's real library.
+function preferredPort() {
+  if (process.env.PORT) return Number(process.env.PORT);
+  return isPackaged ? 8788 : 8787;
+}
+
+function probePort(port) {
+  return new Promise((resolve) => {
     const probe = net.createServer();
-    probe.once("error", reject);
-    probe.listen(0, "127.0.0.1", () => {
-      const port = probe.address().port;
-      probe.close(() => resolve(port));
+    probe.once("error", () => resolve(false));
+    probe.listen(port, "127.0.0.1", () => {
+      probe.close(() => resolve(true));
     });
   });
+}
+
+async function resolveBackendPort() {
+  const port = preferredPort();
+  if (await probePort(port)) return port;
+  // Never fall back to a random port: that would silently give the renderer
+  // a different origin and an empty-looking library. Fail loudly instead.
+  throw new Error(
+    `Port ${port} is already in use. Close the other application using it ` +
+    `(it may be another copy of Vocalis), then relaunch — or set the PORT ` +
+    `environment variable to use a different port.`
+  );
 }
 
 function waitForHealth(port, timeoutMs = 120000) {
@@ -146,7 +169,7 @@ function showStartupError(error) {
 }
 
 async function startBackend() {
-  backendPort = await findFreePort();
+  backendPort = await resolveBackendPort();
   backend = spawn(process.execPath, [serverScript], {
     cwd: path.dirname(serverScript),
     env: runtimeEnvironment(),

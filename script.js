@@ -55,6 +55,7 @@
   function closeLibrary() {
     activeLibrary = null;
     els.library.hidden = true;
+    document.body.classList.remove("library-open");
     document.querySelectorAll("[data-library]").forEach((item) => item.classList.remove("active"));
   }
   function touchRecent(text = els.text.value) {
@@ -72,8 +73,44 @@
     activeLibrary = kind;
     const documents = kind === "saved" ? savedTexts : recentTexts.slice().sort((a, b) => b.lastUsedAt - a.lastUsedAt);
     els.library.hidden = false;
-    const empty = kind === "saved" ? "No saved texts yet. Save a document to keep it here." : "No recent texts yet.";
-    els.library.innerHTML = `<h2>${kind === "saved" ? "Saved texts" : "Recent texts"}</h2><p>${documents.length ? "Select a document to open it in the editor." : empty}</p>${documents.length ? `<div class="library-list">${documents.map((document) => `<button class="library-item" type="button" data-document-id="${document.id}"><span><strong>${document.title}</strong><small>${document.text.length.toLocaleString()} characters</small></span><small>${new Date(document.lastUsedAt || document.updatedAt).toLocaleDateString()}</small></button>`).join("")}</div>` : ""}`;
+    document.body.classList.add("library-open");
+    els.library.textContent = "";
+    const head = document.createElement("div");
+    head.className = "library-head";
+    const heading = document.createElement("h2");
+    heading.textContent = kind === "saved" ? "Saved texts" : "Recent texts";
+    const close = document.createElement("button");
+    close.className = "secondary-button";
+    close.type = "button";
+    close.textContent = "× Close";
+    close.addEventListener("click", closeLibrary);
+    head.append(heading, close);
+    const intro = document.createElement("p");
+    intro.textContent = documents.length
+      ? "Select a document to open it in the editor."
+      : (kind === "saved" ? "No saved texts yet. Save a document to keep it here." : "No recent texts yet.");
+    els.library.append(head, intro);
+    if (documents.length) {
+      const list = document.createElement("div");
+      list.className = "library-list";
+      for (const entry of documents) {
+        const item = document.createElement("button");
+        item.className = "library-item";
+        item.type = "button";
+        item.dataset.documentId = entry.id;
+        const label = document.createElement("span");
+        const title = document.createElement("strong");
+        title.textContent = entry.title;
+        const meta = document.createElement("small");
+        meta.textContent = `${entry.text.length.toLocaleString()} characters`;
+        label.append(title, meta);
+        const date = document.createElement("small");
+        date.textContent = new Date(entry.lastUsedAt || entry.updatedAt).toLocaleDateString();
+        item.append(label, date);
+        list.appendChild(item);
+      }
+      els.library.appendChild(list);
+    }
     document.querySelectorAll("[data-library]").forEach((item) => item.classList.toggle("active", item.dataset.library === kind));
   }
   function openDocument(document) {
@@ -103,25 +140,61 @@
   async function loadVoices() {
     try {
       const { voices } = await api("/api/voices");
-      els.voice.innerHTML = voices.map((voice) => `<option value="${voice.name}|||${voice.lang}">${voice.name} — ${voice.lang}${voice.engine ? ` (${voice.engine})` : ""}</option>`).join("");
+      const voiceList = Array.isArray(voices) ? voices : [];
+      const voiceOptions = document.createDocumentFragment();
+      for (const voice of voiceList) {
+        const name = String(voice.name || "");
+        const lang = String(voice.lang || "local");
+        const engine = voice.engine ? ` (${String(voice.engine)})` : "";
+        const option = document.createElement("option");
+        option.value = `${name}|||${lang}`;
+        option.textContent = `${name} — ${lang}${engine}`;
+        voiceOptions.appendChild(option);
+      }
+      els.voice.replaceChildren(voiceOptions);
       if (savedSettings.voice && [...els.voice.options].some((option) => option.value === savedSettings.voice)) els.voice.value = savedSettings.voice;
-      const langs = [...new Set(voices.map((voice) => voice.lang))].sort();
-      els.language.innerHTML = `<option value="all">All languages</option>${langs.map((lang) => `<option value="${lang}">${lang}</option>`).join("")}`;
+      const langs = [...new Set(voiceList.map((voice) => String(voice.lang || "local")))].sort();
+      const languageOptions = document.createDocumentFragment();
+      const allLanguages = document.createElement("option");
+      allLanguages.value = "all";
+      allLanguages.textContent = "All languages";
+      languageOptions.appendChild(allLanguages);
+      for (const lang of langs) {
+        const option = document.createElement("option");
+        option.value = lang;
+        option.textContent = lang;
+        languageOptions.appendChild(option);
+      }
+      els.language.replaceChildren(languageOptions);
     } catch (error) { els.note.textContent = `Start the local backend to load voices and generate audio: ${error.message}`; els.voice.innerHTML = '<option value="">No voices available</option>'; }
   }
   async function loadDiagnostics() {
     try {
       const diagnostic = await api("/api/diagnostics");
       const voiceSummary = diagnostic.voiceCount ? `${diagnostic.voiceCount} available` : "None detected";
-      els.diagnostics.innerHTML = [
+      const rows = [
         ["Platform", `${diagnostic.platform} · ${diagnostic.architecture}`],
         ["TTS engine", diagnostic.engine],
         ["Voices", voiceSummary],
         ["FFmpeg", diagnostic.ffmpeg ? "Available" : "Unavailable"],
         ["Backend", diagnostic.backend]
-      ].map(([label, value]) => `<div><span>${label}</span><strong>${value}</strong></div>`).join("");
+      ];
+      const fragment = document.createDocumentFragment();
+      for (const [label, value] of rows) {
+        const row = document.createElement("div");
+        const name = document.createElement("span");
+        name.textContent = label;
+        const detail = document.createElement("strong");
+        detail.textContent = value;
+        row.append(name, detail);
+        fragment.appendChild(row);
+      }
+      els.diagnostics.replaceChildren(fragment);
     } catch (error) {
-      els.diagnostics.innerHTML = `<span>Diagnostics unavailable: ${error.message}</span>`;
+      els.diagnostics.textContent = "";
+      const message = document.createElement("span");
+      message.textContent = `Diagnostics unavailable: ${error.message}`;
+      els.diagnostics.appendChild(message);
     }
   }
   function options() { return { voice: selectedVoice(), language: els.language.value === "all" ? "en-us" : els.language.value, rate: Number(els.rate.value), pitch: Number(els.pitch.value), volume: Number(els.volume.value) }; }
@@ -156,10 +229,47 @@
   function restartAudio() { if (!generated) return generateAudio(); els.audio.currentTime = 0; playAudio(); }
   function updateAudioProgress() { if (!els.audio.duration) return; updateProgress((els.audio.currentTime / els.audio.duration) * 100); els.audioDuration.textContent = `${Math.floor(els.audio.currentTime / 60)}:${String(Math.floor(els.audio.currentTime % 60)).padStart(2, "0")} / ${Math.floor(els.audio.duration / 60)}:${String(Math.floor(els.audio.duration % 60)).padStart(2, "0")}`; }
   function renderBatch() {
-    els.batchList.innerHTML = batchDocuments.length ? batchDocuments.map((document, index) => {
-      const result = batchResults[index], status = result?.status || "queued";
-      return `<div class="batch-item"><div><strong>${document.name}</strong><small class="${status === "failed" ? "failed" : ""}">${status}${result?.error ? ` — ${result.error}` : ""}</small></div><div class="batch-downloads">${result?.mp3 ? `<button data-download="${result.mp3}">MP3</button><button data-download="${result.wav}">WAV</button>` : ""}${status === "failed" ? `<button data-retry="${index}">Retry</button>` : ""}</div></div>`;
-    }).join("") : '<p class="empty-batch">Add chapters or documents to generate them sequentially.</p>';
+    els.batchList.textContent = "";
+    if (!batchDocuments.length) {
+      const empty = document.createElement("p");
+      empty.className = "empty-batch";
+      empty.textContent = "Add chapters or documents to generate them sequentially.";
+      els.batchList.appendChild(empty);
+    } else {
+      for (let index = 0; index < batchDocuments.length; index += 1) {
+        const batchDocument = batchDocuments[index];
+        const result = batchResults[index];
+        const status = result?.status || "queued";
+        const item = document.createElement("div");
+        item.className = "batch-item";
+        const details = document.createElement("div");
+        const name = document.createElement("strong");
+        name.textContent = batchDocument.name;
+        const state = document.createElement("small");
+        if (status === "failed") state.className = "failed";
+        state.textContent = `${status}${result?.error ? ` — ${result.error}` : ""}`;
+        details.append(name, state);
+        const downloads = document.createElement("div");
+        downloads.className = "batch-downloads";
+        if (result?.mp3) {
+          const mp3 = document.createElement("button");
+          mp3.dataset.download = result.mp3;
+          mp3.textContent = "MP3";
+          const wav = document.createElement("button");
+          wav.dataset.download = result.wav;
+          wav.textContent = "WAV";
+          downloads.append(mp3, wav);
+        }
+        if (status === "failed") {
+          const retry = document.createElement("button");
+          retry.dataset.retry = String(index);
+          retry.textContent = "Retry";
+          downloads.appendChild(retry);
+        }
+        item.append(details, downloads);
+        els.batchList.appendChild(item);
+      }
+    }
     els.generateAll.disabled = !batchDocuments.length || batchDocuments.every((_, index) => batchResults[index]?.status === "completed");
     els.downloadAll.disabled = !batchResults.some((result) => result?.status === "completed");
   }
@@ -179,6 +289,81 @@
     if (!response.ok) return toast("Unable to create ZIP."); const blob = await response.blob(); const link = document.createElement("a"); link.href = URL.createObjectURL(blob); link.download = "Vocalis_Output.zip"; link.click(); URL.revokeObjectURL(link.href);
   }
   function newDocument() { currentDocumentId = null; closeLibrary(); els.text.value = ""; setDocumentTitle("Untitled document"); generated = null; els.audioPanel.hidden = true; updateCounts(); updateProgress(0); setStatus("Ready to listen"); els.text.focus(); }
+  function downloadJson(filename, data) {
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = filename;
+    link.hidden = true;
+    document.body.appendChild(link);
+    link.click();
+    setTimeout(() => { URL.revokeObjectURL(link.href); link.remove(); }, 1000);
+  }
+  function exportLibrary() {
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+    downloadJson(`vocalis-library-${stamp}.json`, {
+      app: "vocalis",
+      format: 1,
+      exportedAt: new Date().toISOString(),
+      saved: savedTexts,
+      recent: recentTexts,
+      settings: { rate: els.rate.value, pitch: els.pitch.value, volume: els.volume.value, voice: els.voice.value, theme: document.body.classList.contains("light") ? "light" : "dark" }
+    });
+    toast("Library exported as JSON.");
+  }
+  function isValidDocument(value) {
+    return Boolean(value) && typeof value === "object" && !Array.isArray(value)
+      && typeof value.id === "string" && value.id.length > 0
+      && typeof value.text === "string"
+      && (value.title === undefined || typeof value.title === "string");
+  }
+  function normalizeDocument(value) {
+    const now = Date.now();
+    return {
+      id: value.id,
+      title: (typeof value.title === "string" && value.title.trim()) || "Untitled document",
+      text: value.text,
+      createdAt: typeof value.createdAt === "number" ? value.createdAt : now,
+      updatedAt: typeof value.updatedAt === "number" ? value.updatedAt : now,
+      lastUsedAt: typeof value.lastUsedAt === "number" ? value.lastUsedAt : now,
+      saved: value.saved === true
+    };
+  }
+  function importLibrary(file) {
+    const reader = new FileReader();
+    reader.onload = () => {
+      let data;
+      try { data = JSON.parse(reader.result); }
+      catch { toast("Import failed: not valid JSON."); return; }
+      if (!data || typeof data !== "object" || Array.isArray(data)) { toast("Import failed: invalid library file."); return; }
+      const saved = Array.isArray(data.saved) ? data.saved : [];
+      const recent = Array.isArray(data.recent) ? data.recent : [];
+      if (!saved.every(isValidDocument) || !recent.every(isValidDocument)) { toast("Import failed: invalid document entries."); return; }
+      const usedIds = new Set([...savedTexts, ...recentTexts].map((document) => document.id));
+      let renamed = 0;
+      const newSaved = [], newRecent = [];
+      for (const value of saved) {
+        const document = normalizeDocument(value);
+        if (usedIds.has(document.id)) { document.id = crypto.randomUUID(); renamed += 1; }
+        usedIds.add(document.id);
+        newSaved.push({ ...document, saved: true });
+      }
+      for (const value of recent) {
+        const document = normalizeDocument(value);
+        if (usedIds.has(document.id)) { document.id = crypto.randomUUID(); renamed += 1; }
+        usedIds.add(document.id);
+        newRecent.push(document);
+      }
+      const trimmed = Math.max(0, savedTexts.length + newSaved.length - 20) + Math.max(0, recentTexts.length + newRecent.length - 20);
+      savedTexts = [...newSaved, ...savedTexts].slice(0, 20);
+      recentTexts = [...newRecent, ...recentTexts].slice(0, 20);
+      persistDocuments();
+      if (activeLibrary) renderLibrary(activeLibrary);
+      toast(`Imported ${newSaved.length} saved, ${newRecent.length} recent${renamed ? ` (${renamed} renamed to avoid ID conflicts)` : ""}${trimmed ? ` (${trimmed} oldest trimmed to the 20-document limit)` : ""}.`);
+    };
+    reader.onerror = () => toast("Import failed: could not read file.");
+    reader.readAsText(file);
+  }
 
   ["rate", "pitch", "volume"].forEach((key) => { if (savedSettings[key] !== undefined) els[key].value = savedSettings[key]; }); if (savedSettings.theme === "light") document.body.classList.add("light"); updateRangeLabels(); updateCounts(); loadVoices(); loadDiagnostics();
   els.text.addEventListener("input", () => { updateCounts(); if (els.text.value.trim()) { if (els.title.textContent === "Untitled document") setDocumentTitle(titleForText(els.text.value)); touchRecent(); } });
@@ -186,7 +371,18 @@
   els.generate.addEventListener("click", generateAudio); els.play.addEventListener("click", () => { if (els.audio.paused) playAudio(); else { els.audio.pause(); setStatus("Paused", "paused"); } }); els.stop.addEventListener("click", stopAudio); els.restart.addEventListener("click", restartAudio);
   els.previous.addEventListener("click", () => { if (generated) { els.audio.currentTime = Math.max(0, els.audio.currentTime - 15); } }); els.next.addEventListener("click", () => { if (generated) { els.audio.currentTime = Math.min(els.audio.duration || 0, els.audio.currentTime + 15); } });
   els.audio.addEventListener("timeupdate", updateAudioProgress); els.audio.addEventListener("play", () => setStatus("Speaking", "speaking")); els.audio.addEventListener("pause", () => { if (!els.audio.ended) setStatus("Paused", "paused"); }); els.audio.addEventListener("ended", () => { setStatus("Finished", "finished"); updateProgress(100); });
+  document.addEventListener("keydown", (event) => {
+    if (event.code !== "Space" && event.key !== " ") return;
+    const target = event.target;
+    if (target instanceof Element && target.closest("textarea, input, select, [contenteditable='true']")) return;
+    if (target instanceof Element && target.closest("button, a")) return;
+    event.preventDefault();
+    if (els.audio.paused) playAudio();
+    else { els.audio.pause(); setStatus("Paused", "paused"); }
+  });
   $("clearText").addEventListener("click", newDocument); $("newDocument").addEventListener("click", newDocument);
+  $("menuButton").addEventListener("click", () => { $("sidebar").classList.toggle("open"); });
+  document.querySelectorAll("[data-library]").forEach((item) => item.addEventListener("click", () => { $("sidebar").classList.remove("open"); renderLibrary(item.dataset.library); }));
   $("saveText").addEventListener("click", () => {
     const text = els.text.value.trim();
     if (!text) return toast("There is no text to save.");
@@ -206,9 +402,11 @@
   });
   $("copyText").addEventListener("click", async () => { try { await navigator.clipboard.writeText(els.text.value); toast("Text copied."); } catch { toast("Copy permission was denied."); } }); $("pasteText").addEventListener("click", async () => { try { els.text.value = await navigator.clipboard.readText(); els.text.dispatchEvent(new Event("input")); } catch { toast("Paste permission was denied."); } });
   $("fileInput").addEventListener("change", (event) => { const file = event.target.files[0]; if (!file) return; const reader = new FileReader(); reader.onload = () => { els.text.value = reader.result; els.text.dispatchEvent(new Event("input")); }; reader.readAsText(file); event.target.value = ""; });
+  $("exportText").addEventListener("click", exportLibrary);
+  $("importText").addEventListener("click", () => $("libraryFileInput").click());
+  $("libraryFileInput").addEventListener("change", (event) => { const file = event.target.files[0]; if (file) importLibrary(file); event.target.value = ""; });
   els.batchInput.addEventListener("change", (event) => { batchDocuments = [...batchDocuments, ...[...event.target.files].map((file) => ({ name: file.name, text: null }))]; let pending = batchDocuments.filter((document) => !document.text); Promise.all(pending.map((document) => new Promise((resolve) => { const reader = new FileReader(); reader.onload = () => { document.text = reader.result; resolve(); }; reader.readAsText([...event.target.files].find((file) => file.name === document.name)); }))).then(renderBatch); event.target.value = ""; });
   els.batchList.addEventListener("click", (event) => { const download = event.target.dataset.download; if (download) downloadFile(download, download.endsWith(".wav") ? "Vocalis_Output.wav" : "Vocalis_Output.mp3"); const retry = event.target.dataset.retry; if (retry) { batchResults[retry] = { status: "queued" }; generateAll(); } }); els.generateAll.addEventListener("click", generateAll); els.downloadAll.addEventListener("click", downloadAll);
-  document.querySelectorAll("[data-library]").forEach((item) => item.addEventListener("click", () => renderLibrary(item.dataset.library)));
   els.library.addEventListener("click", (event) => { const id = event.target.closest("[data-document-id]")?.dataset.documentId; if (id) { const document = [...recentTexts, ...savedTexts].find((item) => item.id === id); if (document) openDocument(document); } });
   $("themeToggle").addEventListener("click", () => { document.body.classList.toggle("light"); persistSettings(); }); $("readingMode").addEventListener("click", () => { document.body.classList.add("reading-mode"); closeLibrary(); els.text.focus(); }); els.exitReading.addEventListener("click", () => { document.body.classList.remove("reading-mode"); els.text.focus(); });
   persistDocuments();

@@ -13,6 +13,14 @@ const root = process.env.VOCALIS_APP_ROOT || path.join(__dirname, "..");
 const outputDir = process.env.VOCALIS_DATA_DIR || path.join(root, "output");
 fs.mkdirSync(outputDir, { recursive: true });
 const port = Number(process.env.PORT || 8787);
+const MAX_ZIP_FILES = 100;
+const MAX_ZIP_BYTES = 500 * 1024 * 1024;
+const STATIC_ASSETS = new Map([
+  ["/", "index.html"],
+  ["/index.html", "index.html"],
+  ["/style.css", "style.css"],
+  ["/script.js", "script.js"]
+]);
 
 function json(res, status, body) {
   res.writeHead(status, { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" });
@@ -29,8 +37,12 @@ function readBody(req) {
 function safeName(name) {
   return (String(name || "vocalis-document").replace(/[^a-z0-9._-]+/gi, "-").replace(/^-+|-+$/g, "").slice(0, 90) || "vocalis-document");
 }
+let ffmpegCheckResult = null;
 function ffmpegAvailable() {
-  return Boolean(spawnSync(resolveFfmpegPath(), ["-version"], { stdio: "ignore" }).status === 0);
+  if (ffmpegCheckResult === null) {
+    ffmpegCheckResult = Boolean(spawnSync(resolveFfmpegPath(), ["-version"], { stdio: "ignore" }).status === 0);
+  }
+  return ffmpegCheckResult;
 }
 function diagnostics() {
   const ffmpegPath = resolveFfmpegPath();
@@ -103,15 +115,74 @@ async function generateDocument(payload) {
     await Promise.all(chunkFiles.map((file) => fs.promises.rm(file, { force: true })));
   }
 }
+function badRequest(message) {
+  const error = new Error(message);
+  error.statusCode = 400;
+  return error;
+}
+function outputFileForZip(reference) {
+  if (typeof reference !== "string" || !reference.startsWith("/files/")) {
+    throw badRequest("ZIP files must reference generated /files paths.");
+  }
+  const filename = reference.slice("/files/".length);
+  if (!filename || filename !== path.basename(filename) || filename.includes("\\") || filename.includes("/") || filename.includes("%")) {
+    throw badRequest("ZIP file path is invalid.");
+  }
+  const resolvedOutputDir = path.resolve(outputDir);
+  const resolvedFile = path.resolve(resolvedOutputDir, filename);
+  if (!resolvedFile.startsWith(`${resolvedOutputDir}${path.sep}`)) {
+    throw badRequest("ZIP file path must be inside the output directory.");
+  }
+  const extension = path.extname(filename).toLowerCase();
+  if (extension !== ".wav" && extension !== ".mp3") {
+    throw badRequest("ZIP files must be generated WAV or MP3 audio.");
+  }
+  let stats;
+  try {
+    stats = fs.statSync(resolvedFile);
+  } catch {
+    throw badRequest("Requested generated file was not found.");
+  }
+  if (!stats.isFile()) throw badRequest("Requested generated file is invalid.");
+  let realFile;
+  try {
+    realFile = fs.realpathSync(resolvedFile);
+  } catch {
+    throw badRequest("Requested generated file was not found.");
+  }
+  if (!realFile.startsWith(`${fs.realpathSync(resolvedOutputDir)}${path.sep}`)) {
+    throw badRequest("ZIP file path must be inside the output directory.");
+  }
+  return { path: realFile, filename, size: stats.size };
+}
+function zipEntryName(filename, usedNames) {
+  const base = filename.split("-").slice(5).join("-") || filename;
+  const extension = path.extname(base);
+  const stem = extension ? base.slice(0, -extension.length) : base;
+  let name = base;
+  let suffix = 2;
+  while (usedNames.has(name)) name = `${stem} (${suffix++})${extension}`;
+  usedNames.add(name);
+  return name;
+}
+function zipFiles(files) {
+  if (!Array.isArray(files) || files.length === 0) throw badRequest("Select at least one generated file to add to the ZIP.");
+  if (files.length > MAX_ZIP_FILES) throw badRequest(`ZIPs are limited to ${MAX_ZIP_FILES} files.`);
+  let totalBytes = 0;
+  const usedNames = new Set();
+  return files.map((file) => {
+    const outputFile = outputFileForZip(file && file.path);
+    totalBytes += outputFile.size;
+    if (totalBytes > MAX_ZIP_BYTES) throw badRequest("ZIP contents exceed the 500 MB limit.");
+    return { path: outputFile.path, name: zipEntryName(outputFile.filename, usedNames) };
+  });
+}
 function createZip(files, res) {
   res.writeHead(200, { "Content-Type": "application/zip", "Content-Disposition": 'attachment; filename="Vocalis_Output.zip"' });
   const archive = archiver("zip", { zlib: { level: 9 } });
   archive.on("error", (error) => { if (!res.headersSent) json(res, 500, { error: error.message }); else res.destroy(error); });
   archive.pipe(res);
-  files.forEach((file) => {
-    const localPath = String(file.path || "").startsWith("/files/") ? path.join(outputDir, path.basename(file.path)) : file.path;
-    if (localPath && fs.existsSync(localPath)) archive.file(localPath, { name: file.name });
-  });
+  files.forEach((file) => archive.file(file.path, { name: file.name }));
   archive.finalize();
 }
 const server = http.createServer(async (req, res) => {
@@ -129,11 +200,19 @@ const server = http.createServer(async (req, res) => {
       }
       return json(res, 200, { results });
     }
-    if (req.method === "POST" && req.url === "/api/batch/zip") return createZip((await readBody(req)).files || [], res);
+    if (req.method === "POST" && req.url === "/api/batch/zip") return createZip(zipFiles((await readBody(req)).files), res);
     if (req.method === "GET" && req.url.startsWith("/files/")) {
       const filename = path.basename(new URL(req.url, "http://localhost").pathname), file = path.join(outputDir, filename);
-      if (!fs.existsSync(file)) return json(res, 404, { error: "File not found" });
-      const size = fs.statSync(file).size;
+      let realFile;
+      try {
+        realFile = fs.realpathSync(file);
+      } catch {
+        return json(res, 404, { error: "File not found" });
+      }
+      if (!realFile.startsWith(`${fs.realpathSync(path.resolve(outputDir))}${path.sep}`)) {
+        return json(res, 404, { error: "File not found" });
+      }
+      const size = fs.statSync(realFile).size;
       const contentType = filename.endsWith(".mp3") ? "audio/mpeg" : "audio/wav";
       const downloadName = filename.split("-").slice(5).join("-") || filename;
       const range = req.headers.range;
@@ -144,19 +223,21 @@ const server = http.createServer(async (req, res) => {
         const end = match[2] ? Math.min(Number(match[2]), size - 1) : size - 1;
         if (start > end || start >= size) return json(res, 416, { error: "Requested range is not satisfiable" });
         res.writeHead(206, { "Content-Type": contentType, "Content-Length": end - start + 1, "Content-Range": `bytes ${start}-${end}/${size}`, "Accept-Ranges": "bytes", "Content-Disposition": `inline; filename="${downloadName}"` });
-        return fs.createReadStream(file, { start, end }).pipe(res);
+        return fs.createReadStream(realFile, { start, end }).pipe(res);
       }
       res.writeHead(200, { "Content-Type": contentType, "Content-Length": size, "Accept-Ranges": "bytes", "Content-Disposition": `attachment; filename="${downloadName}"` });
-      return fs.createReadStream(file).pipe(res);
+      return fs.createReadStream(realFile).pipe(res);
     }
-    const filePath = req.url === "/" ? path.join(root, "index.html") : path.join(root, path.normalize(req.url).replace(/^(\.\.(\/|\\|$))+/, ""));
-    if (!filePath.startsWith(root) || !fs.existsSync(filePath)) return json(res, 404, { error: "Not found" });
+    const assetName = STATIC_ASSETS.get(new URL(req.url, "http://127.0.0.1").pathname);
+    if (!assetName) return json(res, 404, { error: "Not found" });
+    const filePath = path.join(root, assetName);
+    if (!fs.existsSync(filePath)) return json(res, 404, { error: "Not found" });
     const ext = path.extname(filePath), types = { ".html": "text/html", ".css": "text/css", ".js": "text/javascript" };
     res.writeHead(200, { "Content-Type": types[ext] || "application/octet-stream" }); fs.createReadStream(filePath).pipe(res);
-  } catch (error) { json(res, 500, { error: error.message }); }
+  } catch (error) { json(res, error.statusCode || 500, { error: error.message }); }
 });
 startTts()
-  .then(() => server.listen(port, () => console.log(`Vocalis local server: http://localhost:${port} (${ttsStatus().engine})`)))
+  .then(() => server.listen(port, "127.0.0.1", () => console.log(`Vocalis local server: http://127.0.0.1:${port} (${ttsStatus().engine})`)))
   .catch((error) => {
     console.error(`Unable to start local TTS worker: ${error.message}`);
     process.exitCode = 1;
