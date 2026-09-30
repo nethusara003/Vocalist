@@ -30,35 +30,40 @@ function existingFile(...paths) {
 function registerDownloadHandler() {
   if (downloadHandlerRegistered) return;
   downloadHandlerRegistered = true;
+
   mainWindow.webContents.session.on("will-download", (event, downloadItem) => {
-    downloadItem.pause();
     const filename = downloadItem.getFilename();
-    dialog.showSaveDialog(mainWindow, {
+    const extension = path.extname(filename).slice(1).toLowerCase() || "audio";
+
+    downloadItem.setSaveDialogOptions({
       title: "Save generated audio",
       defaultPath: path.join(app.getPath("downloads"), filename),
-      filters: [{ name: "Audio", extensions: [path.extname(filename).slice(1) || "audio"] }]
-    }).then(({ canceled, filePath }) => {
-      if (canceled || !filePath) {
-        downloadItem.cancel();
+      buttonLabel: "Save",
+      filters: [
+        {
+          name: "Audio",
+          extensions: [extension]
+        }
+      ]
+    });
+
+    downloadItem.once("done", (_event, state) => {
+      const savePath = downloadItem.getSavePath();
+
+      if (state !== "completed") {
+        log(`Download failed ${savePath || filename} (${state})`);
         return;
       }
-      downloadItem.setSavePath(filePath);
-      downloadItem.once("done", (_event, state) => {
-        if (state !== "completed") {
-          log(`Download failed ${filePath} (${state})`);
-          return;
-        }
-        const size = fs.statSync(filePath).size;
-        log(`Download saved ${filePath} (${size} bytes)`);
-      });
-      downloadItem.resume();
-    }).catch((error) => {
-      log(`Save dialog error: ${error.stack || error.message}`);
-      downloadItem.cancel();
+
+      try {
+        const size = fs.statSync(savePath).size;
+        log(`Download saved ${savePath} (${size} bytes)`);
+      } catch (error) {
+        log(`Download completed but file could not be inspected: ${error.message}`);
+      }
     });
   });
 }
-
 function runtimeConfig() {
   try {
     return JSON.parse(fs.readFileSync(path.join(app.getPath("userData"), "runtime.json"), "utf8"));
